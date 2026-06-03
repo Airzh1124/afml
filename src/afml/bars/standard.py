@@ -8,6 +8,7 @@ calling these functions.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from collections.abc import Hashable
 from typing import Any
 
 import pandas as pd
@@ -217,7 +218,7 @@ def _bars_from_boundaries(
     return _finalize_bars(bars)
 
 
-def _empty_bars(index_name: str | None = None) -> pd.DataFrame:
+def _empty_bars(index_name: Hashable | None = None) -> pd.DataFrame:
     return pd.DataFrame(columns=BAR_COLUMNS, index=pd.DatetimeIndex([], name=index_name))
 
 

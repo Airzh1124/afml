@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from collections.abc import Hashable
 from dataclasses import dataclass
 from typing import Any
 
@@ -461,7 +462,7 @@ def _ewma_update(previous: float, observed: float, alpha: float) -> float:
     return alpha * observed + (1.0 - alpha) * previous
 
 
-def _empty_imbalance_bars(index_name: str | None = None) -> pd.DataFrame:
+def _empty_imbalance_bars(index_name: Hashable | None = None) -> pd.DataFrame:
     return pd.DataFrame(
         columns=IMBALANCE_COLUMNS,
         index=pd.DatetimeIndex([], name=index_name),
