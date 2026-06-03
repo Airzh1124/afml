@@ -50,7 +50,8 @@ def etf_trick(
     phi = _align_like(point_value, close, name="point_value")
     carry_frame = _align_like(carry, close, name="carry")
     tau = _align_like(transaction_cost, close, name="transaction_cost")
-    rebalance_flags = _prepare_rebalance(rebalance, close.index)
+    index = _datetime_index(close, name="close")
+    rebalance_flags = _prepare_rebalance(rebalance, index)
 
     if volume is not None:
         volume = _align_frame(volume, close, name="volume")
@@ -66,7 +67,6 @@ def etf_trick(
     if volume is not None and (volume < 0).any().any():
         raise ValueError("volume must be non-negative")
 
-    index = close.index
     columns = close.columns
     open_np = open_.to_numpy(dtype=float, copy=False)
     close_np = close.to_numpy(dtype=float, copy=False)
@@ -232,6 +232,12 @@ def _prepare_rebalance(rebalance: pd.Series | None, index: pd.DatetimeIndex) -> 
     if rebalance.isna().any():
         raise ValueError("rebalance contains missing values")
     return rebalance.astype(bool)
+
+
+def _datetime_index(frame: pd.DataFrame, *, name: str) -> pd.DatetimeIndex:
+    if not isinstance(frame.index, pd.DatetimeIndex):
+        raise TypeError(f"{name} must be indexed by a pandas DatetimeIndex")
+    return frame.index
 
 
 def _holdings_from_weights(
