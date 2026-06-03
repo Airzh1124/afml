@@ -225,4 +225,4 @@ def _empty_bars(index_name: Hashable | None = None) -> pd.DataFrame:
 def _finalize_bars(bars: pd.DataFrame) -> pd.DataFrame:
     if bars.empty:
         return _empty_bars(index_name=bars.index.name)
-    return bars.loc[:, BAR_COLUMNS]
+    return bars.loc[:, list(BAR_COLUMNS)]

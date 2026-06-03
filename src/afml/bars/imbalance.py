@@ -472,4 +472,4 @@ def _empty_imbalance_bars(index_name: Hashable | None = None) -> pd.DataFrame:
 def _finalize_imbalance_bars(bars: pd.DataFrame) -> pd.DataFrame:
     if bars.empty:
         return _empty_imbalance_bars(index_name=bars.index.name)
-    return bars.loc[:, IMBALANCE_COLUMNS]
+    return bars.loc[:, list(IMBALANCE_COLUMNS)]
