@@ -1,0 +1,2 @@
+"""Bar construction methods."""
+

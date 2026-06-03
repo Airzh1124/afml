@@ -1,0 +1,11 @@
+[project]
+name = "afml-research-lab"
+version = "0.1.0"
+description = "Personal research implementation of selected AFML workflows."
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

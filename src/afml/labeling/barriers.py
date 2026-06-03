@@ -1,0 +1,2 @@
+"""Triple-barrier method."""
+

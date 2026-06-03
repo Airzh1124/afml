@@ -1,0 +1,2 @@
+"""Symmetric CUSUM filter."""
+

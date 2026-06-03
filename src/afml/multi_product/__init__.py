@@ -1,0 +1,2 @@
+"""Multi-product series utilities."""
+
