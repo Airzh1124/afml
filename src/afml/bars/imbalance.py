@@ -52,14 +52,56 @@ def tick_imbalance_bars(
 ) -> pd.DataFrame:
     """Build tick imbalance bars.
 
-    The stopping rule is:
+    ``theta_T`` accumulates ``b_t`` and the stopping rule is:
 
     ``abs(theta_T) >= E[T] * max(abs(E[b_t]), min_expected_imbalance)``
-
-    where ``theta_T`` is the cumulative tick-rule imbalance in the current bar.
-    Expectations are updated after each completed bar with recursive EWMA.
     """
-    _validate_tick_imbalance_params(
+    _validate_imbalance_params(
+        expected_ticks_init=expected_ticks_init,
+        expected_imbalance_init=expected_imbalance_init,
+        expected_ticks_window=expected_ticks_window,
+        expected_imbalance_window=expected_imbalance_window,
+        min_expected_imbalance=min_expected_imbalance,
+        expected_imbalance_min=-1,
+        expected_imbalance_max=1,
+    )
+
+    frame = _prepare_ticks(ticks, price_col, volume_col)
+    b = tick_rule(frame[price_col], initial_direction=initial_direction).to_numpy()
+    return _imbalance_bars(
+        frame,
+        imbalance_values=b.astype(float),
+        expected_ticks_init=expected_ticks_init,
+        expected_imbalance_init=expected_imbalance_init,
+        expected_ticks_window=expected_ticks_window,
+        expected_imbalance_window=expected_imbalance_window,
+        min_expected_imbalance=min_expected_imbalance,
+        price_col=price_col,
+        volume_col=volume_col,
+        include_partial=include_partial,
+    )
+
+
+def volume_imbalance_bars(
+    ticks: pd.DataFrame,
+    *,
+    expected_ticks_init: float,
+    expected_imbalance_init: float,
+    expected_ticks_window: int = 20,
+    expected_imbalance_window: int = 20,
+    min_expected_imbalance: float = 1e-6,
+    price_col: str = "price",
+    volume_col: str = "volume",
+    initial_direction: int = 1,
+    include_partial: bool = False,
+) -> pd.DataFrame:
+    """Build volume imbalance bars.
+
+    ``theta_T`` accumulates ``b_t * volume_t`` and the stopping rule is:
+
+    ``abs(theta_T) >= E[T] * max(abs(E[b_t * volume_t]), min_expected_imbalance)``
+    """
+    _validate_imbalance_params(
         expected_ticks_init=expected_ticks_init,
         expected_imbalance_init=expected_imbalance_init,
         expected_ticks_window=expected_ticks_window,
@@ -68,10 +110,83 @@ def tick_imbalance_bars(
     )
 
     frame = _prepare_ticks(ticks, price_col, volume_col)
+    b = tick_rule(frame[price_col], initial_direction=initial_direction).to_numpy()
+    volume = frame[volume_col].to_numpy(dtype=float, copy=False)
+    return _imbalance_bars(
+        frame,
+        imbalance_values=b * volume,
+        expected_ticks_init=expected_ticks_init,
+        expected_imbalance_init=expected_imbalance_init,
+        expected_ticks_window=expected_ticks_window,
+        expected_imbalance_window=expected_imbalance_window,
+        min_expected_imbalance=min_expected_imbalance,
+        price_col=price_col,
+        volume_col=volume_col,
+        include_partial=include_partial,
+    )
+
+
+def dollar_imbalance_bars(
+    ticks: pd.DataFrame,
+    *,
+    expected_ticks_init: float,
+    expected_imbalance_init: float,
+    expected_ticks_window: int = 20,
+    expected_imbalance_window: int = 20,
+    min_expected_imbalance: float = 1e-6,
+    price_col: str = "price",
+    volume_col: str = "volume",
+    initial_direction: int = 1,
+    include_partial: bool = False,
+) -> pd.DataFrame:
+    """Build dollar imbalance bars.
+
+    ``theta_T`` accumulates ``b_t * price_t * volume_t`` and the stopping rule is:
+
+    ``abs(theta_T) >= E[T] * max(abs(E[b_t * price_t * volume_t]), min_expected_imbalance)``
+    """
+    _validate_imbalance_params(
+        expected_ticks_init=expected_ticks_init,
+        expected_imbalance_init=expected_imbalance_init,
+        expected_ticks_window=expected_ticks_window,
+        expected_imbalance_window=expected_imbalance_window,
+        min_expected_imbalance=min_expected_imbalance,
+    )
+
+    frame = _prepare_ticks(ticks, price_col, volume_col)
+    b = tick_rule(frame[price_col], initial_direction=initial_direction).to_numpy()
+    price = frame[price_col].to_numpy(dtype=float, copy=False)
+    volume = frame[volume_col].to_numpy(dtype=float, copy=False)
+    return _imbalance_bars(
+        frame,
+        imbalance_values=b * price * volume,
+        expected_ticks_init=expected_ticks_init,
+        expected_imbalance_init=expected_imbalance_init,
+        expected_ticks_window=expected_ticks_window,
+        expected_imbalance_window=expected_imbalance_window,
+        min_expected_imbalance=min_expected_imbalance,
+        price_col=price_col,
+        volume_col=volume_col,
+        include_partial=include_partial,
+    )
+
+
+def _imbalance_bars(
+    frame: pd.DataFrame,
+    *,
+    imbalance_values: np.ndarray,
+    expected_ticks_init: float,
+    expected_imbalance_init: float,
+    expected_ticks_window: int,
+    expected_imbalance_window: int,
+    min_expected_imbalance: float,
+    price_col: str,
+    volume_col: str,
+    include_partial: bool,
+) -> pd.DataFrame:
     if frame.empty:
         return _empty_imbalance_bars(index_name=frame.index.name)
 
-    b = tick_rule(frame[price_col], initial_direction=initial_direction).to_numpy()
     price = frame[price_col].to_numpy()
     volume = frame[volume_col].to_numpy()
     dollar_value = price * volume
@@ -84,10 +199,10 @@ def tick_imbalance_bars(
     records: list[dict[str, Any]] = []
     index = []
     start = 0
-    theta = 0
+    theta = 0.0
 
-    for position, direction in enumerate(b):
-        theta += int(direction)
+    for position, imbalance in enumerate(imbalance_values):
+        theta += float(imbalance)
         threshold = _imbalance_threshold(
             expected_ticks=expected_ticks,
             expected_imbalance=expected_imbalance,
@@ -117,7 +232,7 @@ def tick_imbalance_bars(
                 imbalance_alpha,
             )
             start = position + 1
-            theta = 0
+            theta = 0.0
 
     if include_partial and start < len(frame):
         threshold = _imbalance_threshold(
@@ -145,24 +260,35 @@ def tick_imbalance_bars(
     return _finalize_imbalance_bars(bars)
 
 
-def _validate_tick_imbalance_params(
+def _validate_imbalance_params(
     *,
     expected_ticks_init: float,
     expected_imbalance_init: float,
     expected_ticks_window: int,
     expected_imbalance_window: int,
     min_expected_imbalance: float,
+    expected_imbalance_min: float | None = None,
+    expected_imbalance_max: float | None = None,
 ) -> None:
     if expected_ticks_init <= 0:
         raise ValueError("expected_ticks_init must be positive")
-    if not -1 <= expected_imbalance_init <= 1:
-        raise ValueError("expected_imbalance_init must be between -1 and 1")
+    if (
+        expected_imbalance_min is not None
+        and expected_imbalance_init < expected_imbalance_min
+    ) or (
+        expected_imbalance_max is not None
+        and expected_imbalance_init > expected_imbalance_max
+    ):
+        raise ValueError(
+            "expected_imbalance_init must be between "
+            f"{expected_imbalance_min} and {expected_imbalance_max}"
+        )
     if expected_ticks_window <= 0:
         raise ValueError("expected_ticks_window must be positive")
     if expected_imbalance_window <= 0:
         raise ValueError("expected_imbalance_window must be positive")
-    if not 0 < min_expected_imbalance <= 1:
-        raise ValueError("min_expected_imbalance must be in (0, 1]")
+    if min_expected_imbalance <= 0:
+        raise ValueError("min_expected_imbalance must be positive")
 
 
 def _append_imbalance_bar(
@@ -175,7 +301,7 @@ def _append_imbalance_bar(
     dollar_value: np.ndarray,
     start: int,
     end: int,
-    theta: int,
+    theta: float,
     threshold: float,
     expected_ticks: float,
     expected_imbalance: float,

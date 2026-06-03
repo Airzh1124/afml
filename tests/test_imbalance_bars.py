@@ -3,7 +3,12 @@
 import pandas as pd
 import pytest
 
-from afml.bars import tick_imbalance_bars, tick_rule
+from afml.bars import (
+    dollar_imbalance_bars,
+    tick_imbalance_bars,
+    tick_rule,
+    volume_imbalance_bars,
+)
 
 
 def _imbalance_ticks() -> pd.DataFrame:
@@ -85,6 +90,58 @@ def test_tick_imbalance_bars_can_include_partial_final_bar() -> None:
     assert bars.index[-1] == pd.Timestamp("2024-01-01 09:30:08")
     assert bars["tick_count"].iloc[-1] == 1
     assert bars["theta"].iloc[-1] == 1
+
+
+def test_volume_imbalance_bars_use_signed_volume() -> None:
+    bars = volume_imbalance_bars(
+        _imbalance_ticks(),
+        expected_ticks_init=3,
+        expected_imbalance_init=2,
+        expected_ticks_window=1,
+        expected_imbalance_window=1,
+    )
+
+    assert list(bars.index) == pd.to_datetime(
+        [
+            "2024-01-01 09:30:02",
+            "2024-01-01 09:30:04",
+            "2024-01-01 09:30:07",
+            "2024-01-01 09:30:08",
+        ]
+    ).tolist()
+    assert list(bars["volume"]) == [6, 9, 21, 9]
+    assert list(bars["dollar_value"]) == [608.0, 904.0, 2094.0, 909.0]
+    assert list(bars["tick_count"]) == [3, 2, 3, 1]
+    assert list(bars["theta"]) == [6.0, -9.0, 9.0, 9.0]
+    assert list(bars["threshold"]) == [6.0, 6.0, 9.0, 9.0]
+    assert list(bars["expected_ticks"]) == [3.0, 3.0, 2.0, 3.0]
+    assert list(bars["expected_imbalance"]) == [2.0, 2.0, -4.5, 3.0]
+
+
+def test_dollar_imbalance_bars_use_signed_dollar_value() -> None:
+    bars = dollar_imbalance_bars(
+        _imbalance_ticks(),
+        expected_ticks_init=3,
+        expected_imbalance_init=200,
+        expected_ticks_window=1,
+        expected_imbalance_window=1,
+    )
+
+    assert list(bars.index) == pd.to_datetime(
+        [
+            "2024-01-01 09:30:02",
+            "2024-01-01 09:30:04",
+            "2024-01-01 09:30:07",
+            "2024-01-01 09:30:08",
+        ]
+    ).tolist()
+    assert list(bars["volume"]) == [6, 9, 21, 9]
+    assert list(bars["dollar_value"]) == [608.0, 904.0, 2094.0, 909.0]
+    assert list(bars["tick_count"]) == [3, 2, 3, 1]
+    assert list(bars["theta"]) == [608.0, -904.0, 906.0, 909.0]
+    assert list(bars["threshold"]) == [600.0, 608.0, 904.0, 906.0]
+    assert list(bars["expected_ticks"]) == [3.0, 3.0, 2.0, 3.0]
+    assert list(bars["expected_imbalance"]) == [200.0, 608.0 / 3.0, -452.0, 302.0]
 
 
 def test_tick_imbalance_bars_use_min_expected_imbalance_floor() -> None:
