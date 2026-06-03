@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -16,6 +18,15 @@ IMBALANCE_COLUMNS = BAR_COLUMNS + (
     "expected_ticks",
     "expected_imbalance",
 )
+
+
+@dataclass(frozen=True)
+class ImbalanceWarmup:
+    """Warm-up state for imbalance bar thresholds."""
+
+    expected_ticks: float
+    expected_imbalance: float
+    threshold: float
 
 
 def tick_rule(prices: pd.Series, *, initial_direction: int = 1) -> pd.Series:
@@ -49,6 +60,7 @@ def tick_imbalance_bars(
     volume_col: str = "volume",
     initial_direction: int = 1,
     include_partial: bool = False,
+    warmup_ticks: int = 0,
 ) -> pd.DataFrame:
     """Build tick imbalance bars.
 
@@ -79,6 +91,7 @@ def tick_imbalance_bars(
         price_col=price_col,
         volume_col=volume_col,
         include_partial=include_partial,
+        warmup_ticks=warmup_ticks,
     )
 
 
@@ -94,6 +107,7 @@ def volume_imbalance_bars(
     volume_col: str = "volume",
     initial_direction: int = 1,
     include_partial: bool = False,
+    warmup_ticks: int = 0,
 ) -> pd.DataFrame:
     """Build volume imbalance bars.
 
@@ -123,6 +137,7 @@ def volume_imbalance_bars(
         price_col=price_col,
         volume_col=volume_col,
         include_partial=include_partial,
+        warmup_ticks=warmup_ticks,
     )
 
 
@@ -138,6 +153,7 @@ def dollar_imbalance_bars(
     volume_col: str = "volume",
     initial_direction: int = 1,
     include_partial: bool = False,
+    warmup_ticks: int = 0,
 ) -> pd.DataFrame:
     """Build dollar imbalance bars.
 
@@ -168,6 +184,58 @@ def dollar_imbalance_bars(
         price_col=price_col,
         volume_col=volume_col,
         include_partial=include_partial,
+        warmup_ticks=warmup_ticks,
+    )
+
+
+def warmup_imbalance_expectations(
+    imbalance_values: Iterable[float],
+    *,
+    expected_ticks_init: float,
+    expected_imbalance_init: float,
+    expected_ticks_window: int = 20,
+    expected_imbalance_window: int = 20,
+    min_expected_imbalance: float = 1e-6,
+) -> ImbalanceWarmup:
+    """Warm up ``E[T]``, ``E[imbalance]``, and the resulting threshold.
+
+    ``imbalance_values`` should be one of:
+
+    - ``b_t`` for tick imbalance bars.
+    - ``b_t * volume_t`` for volume imbalance bars.
+    - ``b_t * price_t * volume_t`` for dollar imbalance bars.
+
+    Completed warm-up bars update expectations; an unfinished warm-up segment is
+    ignored so the production bar stream can start fresh after warm-up.
+    """
+    _validate_imbalance_params(
+        expected_ticks_init=expected_ticks_init,
+        expected_imbalance_init=expected_imbalance_init,
+        expected_ticks_window=expected_ticks_window,
+        expected_imbalance_window=expected_imbalance_window,
+        min_expected_imbalance=min_expected_imbalance,
+    )
+    if isinstance(imbalance_values, np.ndarray):
+        values = np.asarray(imbalance_values, dtype=float)
+    else:
+        values = np.fromiter(imbalance_values, dtype=float)
+    expected_ticks, expected_imbalance = _warmup_expectations(
+        values,
+        expected_ticks_init=expected_ticks_init,
+        expected_imbalance_init=expected_imbalance_init,
+        expected_ticks_window=expected_ticks_window,
+        expected_imbalance_window=expected_imbalance_window,
+        min_expected_imbalance=min_expected_imbalance,
+    )
+    threshold = _imbalance_threshold(
+        expected_ticks=expected_ticks,
+        expected_imbalance=expected_imbalance,
+        min_expected_imbalance=min_expected_imbalance,
+    )
+    return ImbalanceWarmup(
+        expected_ticks=expected_ticks,
+        expected_imbalance=expected_imbalance,
+        threshold=threshold,
     )
 
 
@@ -183,25 +251,36 @@ def _imbalance_bars(
     price_col: str,
     volume_col: str,
     include_partial: bool,
+    warmup_ticks: int,
 ) -> pd.DataFrame:
     if frame.empty:
         return _empty_imbalance_bars(index_name=frame.index.name)
+    if warmup_ticks < 0:
+        raise ValueError("warmup_ticks must be non-negative")
 
     price = frame[price_col].to_numpy()
     volume = frame[volume_col].to_numpy()
     dollar_value = price * volume
 
-    expected_ticks = float(expected_ticks_init)
-    expected_imbalance = float(expected_imbalance_init)
+    warmup_count = min(warmup_ticks, len(frame))
+    expected_ticks, expected_imbalance = _warmup_expectations(
+        imbalance_values[:warmup_count],
+        expected_ticks_init=expected_ticks_init,
+        expected_imbalance_init=expected_imbalance_init,
+        expected_ticks_window=expected_ticks_window,
+        expected_imbalance_window=expected_imbalance_window,
+        min_expected_imbalance=min_expected_imbalance,
+    )
     ticks_alpha = _ewma_alpha(expected_ticks_window)
     imbalance_alpha = _ewma_alpha(expected_imbalance_window)
 
     records: list[dict[str, Any]] = []
     index = []
-    start = 0
+    start = warmup_count
     theta = 0.0
 
-    for position, imbalance in enumerate(imbalance_values):
+    for position in range(warmup_count, len(imbalance_values)):
+        imbalance = imbalance_values[position]
         theta += float(imbalance)
         threshold = _imbalance_threshold(
             expected_ticks=expected_ticks,
@@ -289,6 +368,43 @@ def _validate_imbalance_params(
         raise ValueError("expected_imbalance_window must be positive")
     if min_expected_imbalance <= 0:
         raise ValueError("min_expected_imbalance must be positive")
+
+
+def _warmup_expectations(
+    imbalance_values: np.ndarray,
+    *,
+    expected_ticks_init: float,
+    expected_imbalance_init: float,
+    expected_ticks_window: int,
+    expected_imbalance_window: int,
+    min_expected_imbalance: float,
+) -> tuple[float, float]:
+    expected_ticks = float(expected_ticks_init)
+    expected_imbalance = float(expected_imbalance_init)
+    ticks_alpha = _ewma_alpha(expected_ticks_window)
+    imbalance_alpha = _ewma_alpha(expected_imbalance_window)
+
+    start = 0
+    theta = 0.0
+    for position, imbalance in enumerate(imbalance_values):
+        theta += float(imbalance)
+        threshold = _imbalance_threshold(
+            expected_ticks=expected_ticks,
+            expected_imbalance=expected_imbalance,
+            min_expected_imbalance=min_expected_imbalance,
+        )
+        if abs(theta) >= threshold:
+            bar_length = position - start + 1
+            expected_ticks = _ewma_update(expected_ticks, bar_length, ticks_alpha)
+            expected_imbalance = _ewma_update(
+                expected_imbalance,
+                theta / bar_length,
+                imbalance_alpha,
+            )
+            start = position + 1
+            theta = 0.0
+
+    return expected_ticks, expected_imbalance
 
 
 def _append_imbalance_bar(

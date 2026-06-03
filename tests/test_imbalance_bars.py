@@ -8,6 +8,7 @@ from afml.bars import (
     tick_imbalance_bars,
     tick_rule,
     volume_imbalance_bars,
+    warmup_imbalance_expectations,
 )
 
 
@@ -90,6 +91,40 @@ def test_tick_imbalance_bars_can_include_partial_final_bar() -> None:
     assert bars.index[-1] == pd.Timestamp("2024-01-01 09:30:08")
     assert bars["tick_count"].iloc[-1] == 1
     assert bars["theta"].iloc[-1] == 1
+
+
+def test_warmup_imbalance_expectations_updates_threshold_state() -> None:
+    warmup = warmup_imbalance_expectations(
+        [1, 1, 1, -1, -1, -1],
+        expected_ticks_init=4,
+        expected_imbalance_init=0.5,
+        expected_ticks_window=1,
+        expected_imbalance_window=1,
+    )
+
+    assert warmup.expected_ticks == 4.0
+    assert warmup.expected_imbalance == -0.5
+    assert warmup.threshold == 2.0
+
+
+def test_tick_imbalance_bars_warmup_skips_warmup_rows() -> None:
+    bars = tick_imbalance_bars(
+        _imbalance_ticks(),
+        expected_ticks_init=4,
+        expected_imbalance_init=0.5,
+        expected_ticks_window=1,
+        expected_imbalance_window=1,
+        warmup_ticks=6,
+    )
+
+    assert list(bars.index) == [pd.Timestamp("2024-01-01 09:30:07")]
+    assert bars["open"].iloc[0] == 100.0
+    assert bars["close"].iloc[0] == 100.0
+    assert bars["tick_count"].iloc[0] == 2
+    assert bars["theta"].iloc[0] == 2.0
+    assert bars["expected_ticks"].iloc[0] == 4.0
+    assert bars["expected_imbalance"].iloc[0] == -0.5
+    assert bars["threshold"].iloc[0] == 2.0
 
 
 def test_volume_imbalance_bars_use_signed_volume() -> None:
