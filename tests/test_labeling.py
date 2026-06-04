@@ -95,6 +95,25 @@ def test_get_events_returns_first_touch_and_filters_small_targets() -> None:
     assert "side" not in events.columns
 
 
+def test_get_events_supports_meta_labeling_side_and_asymmetric_barriers() -> None:
+    close = _close()
+    t_events = pd.DatetimeIndex(["2024-01-01 09:30:00", "2024-01-01 09:31:00"])
+    target = pd.Series([0.02, 0.02], index=t_events, name="trgt")
+    side = pd.Series([1.0, -1.0], index=t_events, name="side")
+    t1 = pd.Series(pd.to_datetime(["2024-01-01 09:35:00"] * 2), index=t_events, name="t1")
+
+    events = get_events(close, t_events, [1, 2], target, min_ret=0, t1=t1, side=side)
+
+    assert list(events.columns) == ["t1", "trgt", "side"]
+    assert events.loc[pd.Timestamp("2024-01-01 09:30:00"), "t1"] == pd.Timestamp(
+        "2024-01-01 09:31:00"
+    )
+    assert events.loc[pd.Timestamp("2024-01-01 09:31:00"), "t1"] == pd.Timestamp(
+        "2024-01-01 09:32:00"
+    )
+    assert list(events["side"]) == [1.0, -1.0]
+
+
 def test_get_bins_labels_realized_returns_from_events() -> None:
     close = _close()
     events = pd.DataFrame(
@@ -117,6 +136,36 @@ def test_get_bins_labels_realized_returns_from_events() -> None:
     assert labels.loc[pd.Timestamp("2024-01-01 09:30:00"), "bin"] == 1
     assert labels.loc[pd.Timestamp("2024-01-01 09:32:00"), "ret"] == pytest.approx(101 / 99 - 1)
     assert labels.loc[pd.Timestamp("2024-01-01 09:32:00"), "bin"] == 1
+
+
+def test_get_bins_meta_labels_side_adjusted_pnl() -> None:
+    close = _close()
+    events = pd.DataFrame(
+        {
+            "t1": pd.to_datetime(["2024-01-01 09:31:00", "2024-01-01 09:32:00"]),
+            "trgt": [0.02, 0.02],
+            "side": [1.0, -1.0],
+        },
+        index=pd.DatetimeIndex(["2024-01-01 09:30:00", "2024-01-01 09:31:00"]),
+    )
+
+    labels = get_bins(events, close)
+
+    assert labels.loc[pd.Timestamp("2024-01-01 09:30:00"), "ret"] == pytest.approx(0.03)
+    assert labels.loc[pd.Timestamp("2024-01-01 09:30:00"), "bin"] == 1
+    assert labels.loc[pd.Timestamp("2024-01-01 09:31:00"), "ret"] == pytest.approx(
+        -(99 / 103 - 1)
+    )
+    assert labels.loc[pd.Timestamp("2024-01-01 09:31:00"), "bin"] == 1
+
+    bad_short = events.copy()
+    bad_short.loc[pd.Timestamp("2024-01-01 09:31:00"), "t1"] = pd.Timestamp(
+        "2024-01-01 09:35:00"
+    )
+    labels = get_bins(bad_short, close)
+
+    assert labels.loc[pd.Timestamp("2024-01-01 09:31:00"), "ret"] < 0
+    assert labels.loc[pd.Timestamp("2024-01-01 09:31:00"), "bin"] == 0
 
 
 def test_get_events_then_get_bins_end_to_end() -> None:
@@ -144,3 +193,7 @@ def test_get_events_validates_symmetric_barriers() -> None:
 
     with pytest.raises(ValueError, match="'t1'"):
         get_bins(events, close)
+
+    side = pd.Series([0.0], index=events.index)
+    with pytest.raises(ValueError, match="-1 or 1"):
+        get_events(close, events.index, [1, 2], pd.Series([0.01], index=events.index), 0, side=side)

@@ -105,13 +105,17 @@ def get_events(
     min_ret: float,
     *,
     t1: pd.Series | bool = False,
+    side: pd.Series | None = None,
     num_threads: int = 1,
 ) -> pd.DataFrame:
     """Find the first barrier touch for sampled events.
 
-    This follows AFML Snippet 3.3 for the case where the bet side is unknown.
-    The horizontal barriers are therefore symmetric. ``num_threads`` is accepted
-    for API compatibility with the book, but this implementation runs in-process.
+    This follows AFML Snippets 3.3 and 3.6. If ``side`` is not supplied, the
+    horizontal barriers are symmetric and the output is used to learn bet side.
+    If ``side`` is supplied, meta-labeling is in play: profit-taking and stop-loss
+    barriers may differ, and ``side`` is retained in the returned events.
+    ``num_threads`` is accepted for API compatibility with the book, but this
+    implementation runs in-process.
     """
     close = _prepare_close(close)
     event_index = pd.DatetimeIndex(t_events)
@@ -120,25 +124,30 @@ def get_events(
     if num_threads < 1:
         raise ValueError("num_threads must be positive")
 
-    pt, sl = _prepare_symmetric_pt_sl(pt_sl)
+    pt, sl = _prepare_symmetric_pt_sl(pt_sl) if side is None else _prepare_pt_sl_from_any(pt_sl)
     target = _prepare_target(trgt)
     target = target.reindex(event_index).dropna()
     target = target[target > min_ret]
 
     if target.empty:
-        return pd.DataFrame(
-            {"t1": pd.Series(dtype="datetime64[ns]"), "trgt": pd.Series(dtype=float)},
-            index=target.index,
-        )
+        columns = ["t1", "trgt"] if side is None else ["t1", "trgt", "side"]
+        return _empty_events(index=target.index, columns=columns)
 
     t1_series = _prepare_t1(t1, target.index)
-    side = pd.Series(1.0, index=target.index, name="side")
-    events = pd.concat({"t1": t1_series, "trgt": target, "side": side}, axis=1)
+    side_series = (
+        pd.Series(1.0, index=target.index, name="side")
+        if side is None
+        else _prepare_side(side).reindex(target.index)
+    )
+    events = pd.concat({"t1": t1_series, "trgt": target, "side": side_series}, axis=1)
     events = events.dropna(subset=["trgt"])
+    events = events.dropna(subset=["side"]) if side is not None else events
 
     touches = apply_pt_sl_on_t1(close, events, (pt, sl))
     events["t1"] = touches.dropna(how="all").min(axis=1, skipna=True)
-    return events.drop(columns="side").loc[:, ["t1", "trgt"]]
+    if side is None:
+        return events.drop(columns="side").loc[:, ["t1", "trgt"]]
+    return events.loc[:, ["t1", "trgt", "side"]]
 
 
 def _prepare_close(close: pd.Series) -> pd.Series:
@@ -185,6 +194,15 @@ def _prepare_pt_sl(pt_sl: tuple[float, float] | list[float]) -> tuple[float, flo
     return pt, sl
 
 
+def _prepare_pt_sl_from_any(pt_sl: float | tuple[float, float] | list[float]) -> tuple[float, float]:
+    if isinstance(pt_sl, (int, float)):
+        value = float(pt_sl)
+        if value < 0:
+            raise ValueError("pt_sl must be non-negative")
+        return value, value
+    return _prepare_pt_sl(pt_sl)
+
+
 def _prepare_symmetric_pt_sl(
     pt_sl: float | tuple[float, float] | list[float],
 ) -> tuple[float, float]:
@@ -210,6 +228,17 @@ def _prepare_target(trgt: pd.Series) -> pd.Series:
     return trgt.astype(float).sort_index(kind="mergesort")
 
 
+def _prepare_side(side: pd.Series) -> pd.Series:
+    if not isinstance(side, pd.Series):
+        raise TypeError("side must be a pandas Series")
+    if not isinstance(side.index, pd.DatetimeIndex):
+        raise TypeError("side must be indexed by a pandas DatetimeIndex")
+    cleaned = side.dropna().astype(float)
+    if not cleaned.isin([-1.0, 1.0]).all():
+        raise ValueError("side values must be -1 or 1")
+    return cleaned.sort_index(kind="mergesort").rename("side")
+
+
 def _prepare_t1(t1: pd.Series | bool, event_index: pd.DatetimeIndex) -> pd.Series:
     if isinstance(t1, bool):
         if t1 is not False:
@@ -221,3 +250,13 @@ def _prepare_t1(t1: pd.Series | bool, event_index: pd.DatetimeIndex) -> pd.Serie
         raise TypeError("t1 must be indexed by a pandas DatetimeIndex")
     return pd.to_datetime(t1.reindex(event_index)).rename("t1")
 
+
+def _empty_events(index: pd.DatetimeIndex, columns: list[str]) -> pd.DataFrame:
+    data = {}
+    if "t1" in columns:
+        data["t1"] = pd.Series(dtype="datetime64[ns]")
+    if "trgt" in columns:
+        data["trgt"] = pd.Series(dtype=float)
+    if "side" in columns:
+        data["side"] = pd.Series(dtype=float)
+    return pd.DataFrame(data, index=index).loc[:, columns]

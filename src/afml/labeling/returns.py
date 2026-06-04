@@ -9,8 +9,10 @@ import pandas as pd
 def get_bins(events: pd.DataFrame, close: pd.Series) -> pd.DataFrame:
     """Label events by realized return at the first touched barrier.
 
-    This follows AFML Snippet 3.5. ``events`` must contain ``t1`` values already
-    computed by ``get_events``. Events with missing ``t1`` are skipped.
+    This follows AFML Snippets 3.5 and 3.7. ``events`` must contain ``t1``
+    values already computed by ``get_events``. If ``side`` is included, returns
+    are side-adjusted and labels become binary ``{0, 1}`` for meta-labeling.
+    Events with missing ``t1`` are skipped.
     """
     if "t1" not in events.columns:
         raise ValueError("events must include a 't1' column")
@@ -28,7 +30,11 @@ def get_bins(events: pd.DataFrame, close: pd.Series) -> pd.DataFrame:
 
     out = pd.DataFrame(index=events_.index)
     out["ret"] = prices.loc[events_["t1"].to_numpy()].to_numpy() / prices.loc[events_.index] - 1.0
+    if "side" in events_.columns:
+        out["ret"] *= events_["side"]
     out["bin"] = np.sign(out["ret"])
+    if "side" in events_.columns:
+        out.loc[out["ret"] <= 0, "bin"] = 0
     return out
 
 
