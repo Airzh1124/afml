@@ -44,3 +44,22 @@ def test_normalize_binance_trades_outputs_framework_schema(tmp_path: Path) -> No
     assert pd.to_datetime(normalized["timestamp"]).iloc[0] == pd.Timestamp(
         "2026-06-03 00:00:00.127434+0000"
     )
+
+
+def test_normalize_binance_trades_can_limit_rows(tmp_path: Path) -> None:
+    raw = tmp_path / "BTCUSDT-trades-2026-06.csv"
+    raw.write_text(
+        "\n".join(
+            [
+                "1,100.0,1.0,100.0,1780444800000000,False,True",
+                "2,101.0,1.0,101.0,1780444801000000,True,True",
+                "3,102.0,1.0,102.0,1780444802000000,False,True",
+            ]
+        )
+    )
+    output = tmp_path / "normalized.csv"
+
+    normalize_binance_trades(raw, output, chunksize=2, max_rows=2)
+
+    normalized = pd.read_csv(output)
+    assert list(normalized["trade_id"]) == [1, 2]

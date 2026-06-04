@@ -10,6 +10,7 @@ htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
+notebooks/*_executed*.ipynb
 
 # Local environments
 .env

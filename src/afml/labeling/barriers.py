@@ -66,8 +66,8 @@ def apply_pt_sl_on_t1(
     events_subset = events.loc[molecule_index]
 
     out = events_subset[["t1"]].copy(deep=True)
-    out["sl"] = pd.NaT
-    out["pt"] = pd.NaT
+    out["sl"] = pd.Series(pd.NaT, index=out.index, dtype=out["t1"].dtype)
+    out["pt"] = pd.Series(pd.NaT, index=out.index, dtype=out["t1"].dtype)
 
     pt_threshold = pt * events_subset["trgt"] if pt > 0 else None
     sl_threshold = -sl * events_subset["trgt"] if sl > 0 else None
@@ -144,7 +144,7 @@ def get_events(
     events = events.dropna(subset=["side"]) if side is not None else events
 
     touches = apply_pt_sl_on_t1(close, events, (pt, sl))
-    events["t1"] = touches.dropna(how="all").min(axis=1, skipna=True)
+    events["t1"] = _first_touch(touches)
     if side is None:
         return events.drop(columns="side").loc[:, ["t1", "trgt"]]
     return events.loc[:, ["t1", "trgt", "side"]]
@@ -260,3 +260,11 @@ def _empty_events(index: pd.DatetimeIndex, columns: list[str]) -> pd.DataFrame:
     if "side" in columns:
         data["side"] = pd.Series(dtype=float)
     return pd.DataFrame(data, index=index).loc[:, columns]
+
+
+def _first_touch(touches: pd.DataFrame) -> pd.Series:
+    first = {}
+    for event_time, row in touches.iterrows():
+        candidates = row.dropna()
+        first[event_time] = candidates.min() if not candidates.empty else pd.NaT
+    return pd.Series(first, name="t1")

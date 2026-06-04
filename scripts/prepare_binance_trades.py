@@ -37,6 +37,7 @@ def normalize_binance_trades(
     *,
     symbol: str | None = None,
     chunksize: int = 1_000_000,
+    max_rows: int | None = None,
     time_unit: str = "us",
 ) -> Path:
     """Convert Binance raw trades to the project's tick-data schema.
@@ -49,6 +50,8 @@ def normalize_binance_trades(
     output_path = Path(output_path)
     if chunksize <= 0:
         raise ValueError("chunksize must be positive")
+    if max_rows is not None and max_rows <= 0:
+        raise ValueError("max_rows must be positive")
     if not input_path.exists():
         raise FileNotFoundError(input_path)
 
@@ -56,12 +59,19 @@ def normalize_binance_trades(
     inferred_symbol = symbol or _infer_symbol(input_path)
 
     wrote_header = False
+    rows_written = 0
     for chunk in pd.read_csv(
         input_path,
         header=None,
         names=BINANCE_TRADE_COLUMNS,
         chunksize=chunksize,
     ):
+        if max_rows is not None:
+            remaining = max_rows - rows_written
+            if remaining <= 0:
+                break
+            chunk = chunk.iloc[:remaining]
+
         normalized = _normalize_chunk(
             chunk,
             symbol=inferred_symbol,
@@ -74,6 +84,7 @@ def normalize_binance_trades(
             index=False,
         )
         wrote_header = True
+        rows_written += len(chunk)
 
     return output_path
 
@@ -135,6 +146,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--symbol", default=None, help="Symbol override.")
     parser.add_argument("--chunksize", type=int, default=1_000_000)
     parser.add_argument(
+        "--max-rows",
+        type=int,
+        default=None,
+        help="Optional maximum number of raw rows to normalize.",
+    )
+    parser.add_argument(
         "--time-unit",
         default="us",
         help="Pandas timestamp unit for Binance time field. Default: us.",
@@ -150,6 +167,7 @@ def main() -> None:
         output,
         symbol=args.symbol,
         chunksize=args.chunksize,
+        max_rows=args.max_rows,
         time_unit=args.time_unit,
     )
     print(written)

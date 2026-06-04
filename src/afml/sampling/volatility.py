@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+import numpy as np
 import pandas as pd
 
 
@@ -19,15 +20,17 @@ def daily_volatility(close: pd.Series, *, span: int = 100) -> pd.Series:
         raise ValueError("span must be positive")
 
     previous_positions = close.index.searchsorted(close.index - pd.Timedelta(days=1))
-    previous_positions = previous_positions[previous_positions > 0]
-    if len(previous_positions) == 0:
+    valid = previous_positions > 0
+    if not valid.any():
         return pd.Series(dtype=float, index=close.index[:0], name="daily_volatility")
 
-    current_index = close.index[close.shape[0] - previous_positions.shape[0] :]
-    previous_index = close.index[previous_positions - 1]
-    previous_index = pd.Series(previous_index, index=current_index)
+    current_positions = np.flatnonzero(valid)
+    previous_positions = previous_positions[valid] - 1
 
-    daily_returns = close.loc[previous_index.index] / close.loc[previous_index.values].to_numpy() - 1
+    daily_returns = pd.Series(
+        close.iloc[current_positions].to_numpy() / close.iloc[previous_positions].to_numpy() - 1,
+        index=close.index[current_positions],
+    )
     volatility = daily_returns.ewm(span=span).std()
     volatility.name = "daily_volatility"
     return volatility

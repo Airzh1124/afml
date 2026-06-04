@@ -55,6 +55,26 @@ def test_daily_volatility_returns_empty_when_series_is_shorter_than_one_day() ->
     assert vol.name == "daily_volatility"
 
 
+def test_daily_volatility_handles_timezone_aware_index() -> None:
+    close = pd.Series(
+        [100.0, 101.0, 102.0, 104.0],
+        index=pd.DatetimeIndex(
+            [
+                "2024-01-01 09:30:00+00:00",
+                "2024-01-01 10:30:00+00:00",
+                "2024-01-02 09:30:00+00:00",
+                "2024-01-02 10:30:00+00:00",
+            ],
+            name="timestamp",
+        ),
+    )
+
+    vol = daily_volatility(close, span=2)
+
+    assert list(vol.index) == [pd.Timestamp("2024-01-02 10:30:00+00:00")]
+    assert vol.name == "daily_volatility"
+
+
 def test_target_from_events_aligns_and_filters_dynamic_target() -> None:
     target = pd.Series(
         [0.01, 0.03, 0.02],
