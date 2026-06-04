@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-import numpy as np
 import pandas as pd
 
 
 EVENT_COLUMNS = ("t1", "trgt", "side")
 TOUCH_COLUMNS = ("t1", "sl", "pt")
-LABEL_COLUMNS = ("t1", "trgt", "side", "pt", "sl", "ret", "label")
 
 
 def add_vertical_barrier(
@@ -143,46 +141,6 @@ def get_events(
     return events.drop(columns="side").loc[:, ["t1", "trgt"]]
 
 
-def triple_barrier_labels(
-    close: pd.Series,
-    events: pd.DataFrame,
-    pt_sl_t1: tuple[float, float, int] | list[float],
-) -> pd.DataFrame:
-    """Compute labels using profit-taking, stop-loss, and vertical barriers.
-
-    ``pt_sl_t1`` is ``[pt, sl, t1]`` where zero disables a barrier. ``events``
-    must include ``trgt`` and may include ``t1`` and ``side``. If no ``side`` is
-    supplied, side defaults to ``1``.
-    """
-    close = _prepare_close(close)
-    if len(pt_sl_t1) != 3:
-        raise ValueError("pt_sl_t1 must contain [pt, sl, t1]")
-    pt, sl, use_t1 = pt_sl_t1
-    events = _prepare_events(events)
-
-    if not use_t1:
-        events = events.copy()
-        events["t1"] = pd.NaT
-
-    touches = apply_pt_sl_on_t1(close, events, (pt, sl))
-    first_touch = touches[["t1", "sl", "pt"]].min(axis=1, skipna=True)
-    first_touch = first_touch.fillna(close.index[-1])
-
-    out = events.copy()
-    out["pt"] = touches["pt"]
-    out["sl"] = touches["sl"]
-    out["ret"] = np.nan
-    out["label"] = 0
-
-    for event_time, touch_time in first_touch.items():
-        ret = close.loc[touch_time] / close.loc[event_time] - 1.0
-        ret *= float(out.loc[event_time, "side"])
-        out.loc[event_time, "ret"] = ret
-        out.loc[event_time, "label"] = _label_from_return(ret)
-
-    return out.loc[:, list(LABEL_COLUMNS)]
-
-
 def _prepare_close(close: pd.Series) -> pd.Series:
     if not isinstance(close, pd.Series):
         raise TypeError("close must be a pandas Series")
@@ -263,10 +221,3 @@ def _prepare_t1(t1: pd.Series | bool, event_index: pd.DatetimeIndex) -> pd.Serie
         raise TypeError("t1 must be indexed by a pandas DatetimeIndex")
     return pd.to_datetime(t1.reindex(event_index)).rename("t1")
 
-
-def _label_from_return(ret: float) -> int:
-    if ret > 0:
-        return 1
-    if ret < 0:
-        return -1
-    return 0
