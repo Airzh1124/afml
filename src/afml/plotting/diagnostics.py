@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Sequence
 
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.axes import Axes
+from matplotlib.patches import Rectangle
+
+OHLC_COLUMNS = ["open", "high", "low", "close"]
 
 
 def plot_bars(
@@ -16,19 +20,48 @@ def plot_bars(
     ax: Axes | None = None,
     title: str | None = None,
     marker: str = ".",
+    style: Literal["auto", "candlestick", "line"] = "auto",
+    up_color: str = "tab:green",
+    down_color: str = "tab:red",
+    wick_color: str = "0.25",
+    body_width: float | None = None,
 ) -> Axes:
-    """Plot a bar price series.
+    """Plot a bar price series or OHLC candlesticks.
 
     This is intended for quick visual inspection of time, tick, volume, dollar,
     imbalance, and runs bars. The DataFrame must use a ``DatetimeIndex``.
+    If ``open``, ``high``, ``low``, and ``close`` are available, ``style="auto"``
+    draws candlesticks. Otherwise it falls back to a close-price line plot.
     """
-    bars = _prepare_frame(bars, required_columns=[price_col], name="bars")
+    if style not in {"auto", "candlestick", "line"}:
+        raise ValueError("style must be 'auto', 'candlestick', or 'line'")
+
+    required_columns = OHLC_COLUMNS if style == "candlestick" else [price_col]
+    bars = _prepare_frame(bars, required_columns=required_columns, name="bars")
     ax = _get_ax(ax)
-    ax.plot(bars.index, bars[price_col], marker=marker, linewidth=1.2)
+
+    has_ohlc = all(column in bars.columns for column in OHLC_COLUMNS)
+    use_candlestick = style == "candlestick" or (style == "auto" and has_ohlc)
+    if use_candlestick:
+        _plot_candlesticks(
+            ax,
+            bars.loc[:, OHLC_COLUMNS].astype(float),
+            up_color=up_color,
+            down_color=down_color,
+            wick_color=wick_color,
+            body_width=body_width,
+        )
+        ax.set_ylabel("price")
+        ax.set_title(title or "OHLC bars")
+    else:
+        bars = _prepare_frame(bars, required_columns=[price_col], name="bars")
+        ax.plot(bars.index, bars[price_col], marker=marker, linewidth=1.2)
+        ax.set_ylabel(price_col)
+        ax.set_title(title or f"{price_col} bars")
+
     ax.set_xlabel("time")
-    ax.set_ylabel(price_col)
-    ax.set_title(title or f"{price_col} bars")
     ax.grid(True, alpha=0.25)
+    _format_time_axis(ax)
     return ax
 
 
@@ -60,6 +93,7 @@ def plot_cusum_events(
     ax.set_title(title or "CUSUM events")
     ax.grid(True, alpha=0.25)
     ax.legend()
+    _format_time_axis(ax)
     return ax
 
 
@@ -136,7 +170,87 @@ def plot_triple_barrier_event(
     ax.set_title(title or "Triple-barrier event")
     ax.grid(True, alpha=0.25)
     ax.legend()
+    _format_time_axis(ax)
     return ax
+
+
+def _plot_candlesticks(
+    ax: Axes,
+    bars: pd.DataFrame,
+    *,
+    up_color: str,
+    down_color: str,
+    wick_color: str,
+    body_width: float | None,
+) -> None:
+    x_values = mdates.date2num(bars.index.to_pydatetime())
+    width = body_width if body_width is not None else _infer_body_width(x_values)
+
+    ax.vlines(
+        x_values,
+        bars["low"].to_numpy(),
+        bars["high"].to_numpy(),
+        color=wick_color,
+        linewidth=0.8,
+        alpha=0.85,
+        zorder=1,
+    )
+
+    for x_value, row in zip(x_values, bars.itertuples(index=False), strict=True):
+        open_ = row.open
+        close = row.close
+        color = up_color if close >= open_ else down_color
+        body_bottom = min(open_, close)
+        body_height = abs(close - open_)
+
+        if body_height == 0:
+            ax.hlines(
+                close,
+                x_value - width / 2,
+                x_value + width / 2,
+                color=color,
+                linewidth=1.2,
+                zorder=2,
+            )
+            continue
+
+        ax.add_patch(
+            Rectangle(
+                (x_value - width / 2, body_bottom),
+                width,
+                body_height,
+                facecolor=color,
+                edgecolor=color,
+                linewidth=0.8,
+                alpha=0.85,
+                zorder=2,
+            )
+        )
+
+    ax.set_xlim(x_values[0] - width, x_values[-1] + width)
+    ax.update_datalim(
+        [
+            (x_values[0], float(bars["low"].min())),
+            (x_values[-1], float(bars["high"].max())),
+        ]
+    )
+    ax.autoscale_view()
+
+
+def _infer_body_width(x_values: Sequence[float]) -> float:
+    if len(x_values) < 2:
+        return 1.0 / (24 * 60) * 0.6
+    deltas = pd.Series(x_values).diff().dropna()
+    positive_deltas = deltas[deltas > 0]
+    if positive_deltas.empty:
+        return 1.0 / (24 * 60) * 0.6
+    return float(positive_deltas.median() * 0.65)
+
+
+def _format_time_axis(ax: Axes) -> None:
+    locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
 
 
 def _prepare_frame(

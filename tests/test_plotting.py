@@ -18,7 +18,27 @@ def _close() -> pd.Series:
     )
 
 
-def test_plot_bars_returns_axes() -> None:
+def test_plot_bars_draws_candlesticks_when_ohlc_is_available() -> None:
+    index = pd.date_range("2024-01-01 09:30:00", periods=4, freq="min")
+    bars = pd.DataFrame(
+        {
+            "open": [100.0, 101.0, 100.0, 99.0],
+            "high": [102.0, 102.0, 101.0, 101.0],
+            "low": [99.0, 100.0, 98.0, 98.0],
+            "close": [101.0, 100.0, 99.0, 100.0],
+        },
+        index=index,
+    )
+
+    ax = plot_bars(bars)
+
+    assert ax.get_title() == "OHLC bars"
+    assert len(ax.patches) == len(bars)
+    assert len(ax.collections) == 1
+    plt.close(ax.figure)
+
+
+def test_plot_bars_falls_back_to_line_plot() -> None:
     bars = pd.DataFrame({"close": _close()})
 
     ax = plot_bars(bars)
@@ -26,6 +46,17 @@ def test_plot_bars_returns_axes() -> None:
     assert ax.get_title() == "close bars"
     assert len(ax.lines) == 1
     plt.close(ax.figure)
+
+
+def test_plot_bars_requires_ohlc_for_candlestick_style() -> None:
+    bars = pd.DataFrame({"close": _close()})
+
+    try:
+        plot_bars(bars, style="candlestick")
+    except ValueError as exc:
+        assert "missing required columns" in str(exc)
+    else:
+        raise AssertionError("plot_bars should require OHLC columns for candlestick style")
 
 
 def test_plot_cusum_events_returns_axes_with_markers() -> None:
