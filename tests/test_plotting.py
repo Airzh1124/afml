@@ -48,6 +48,16 @@ def test_plot_bars_falls_back_to_line_plot() -> None:
     plt.close(ax.figure)
 
 
+def test_plot_bars_can_use_bar_number_axis() -> None:
+    bars = pd.DataFrame({"close": _close()})
+
+    ax = plot_bars(bars, x_axis="bar")
+
+    assert ax.get_xlabel() == "bar"
+    assert list(ax.lines[0].get_xdata()) == [0, 1, 2, 3]
+    plt.close(ax.figure)
+
+
 def test_plot_bars_requires_ohlc_for_candlestick_style() -> None:
     bars = pd.DataFrame({"close": _close()})
 
