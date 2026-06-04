@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from afml.labeling import add_vertical_barrier, apply_pt_sl_on_t1, get_bins, get_events
+from afml.labeling import add_vertical_barrier, apply_pt_sl_on_t1, drop_labels, get_bins, get_events
 
 
 def _close() -> pd.Series:
@@ -197,3 +197,33 @@ def test_get_events_validates_symmetric_barriers() -> None:
     side = pd.Series([0.0], index=events.index)
     with pytest.raises(ValueError, match="-1 or 1"):
         get_events(close, events.index, [1, 2], pd.Series([0.01], index=events.index), 0, side=side)
+
+
+def test_drop_labels_recursively_removes_under_populated_classes() -> None:
+    events = pd.DataFrame(
+        {
+            "bin": [1, 1, 1, 1, 1, -1, -1, -1, 0, 2],
+            "ret": range(10),
+        }
+    )
+
+    filtered = drop_labels(events, min_pct=0.2)
+
+    assert set(filtered["bin"]) == {-1, 1}
+    assert len(filtered) == 8
+
+
+def test_drop_labels_stops_when_only_two_classes_remain() -> None:
+    events = pd.DataFrame({"bin": [1, 1, 1, 1, 0]})
+
+    filtered = drop_labels(events, min_pct=0.4)
+
+    assert list(filtered["bin"]) == [1, 1, 1, 1, 0]
+
+
+def test_drop_labels_validates_inputs() -> None:
+    with pytest.raises(ValueError, match="'bin'"):
+        drop_labels(pd.DataFrame({"label": [1, 0]}))
+
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        drop_labels(pd.DataFrame({"bin": [1, 0]}), min_pct=1.5)

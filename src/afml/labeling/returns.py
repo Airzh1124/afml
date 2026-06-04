@@ -6,6 +6,29 @@ import numpy as np
 import pandas as pd
 
 
+def drop_labels(events: pd.DataFrame, *, min_pct: float = 0.05) -> pd.DataFrame:
+    """Recursively drop under-populated labels.
+
+    This follows AFML Snippet 3.8. Labels with frequency below ``min_pct`` are
+    removed until every remaining label is sufficiently represented, or fewer
+    than three labels remain.
+    """
+    if not isinstance(events, pd.DataFrame):
+        raise TypeError("events must be a pandas DataFrame")
+    if "bin" not in events.columns:
+        raise ValueError("events must include a 'bin' column")
+    if not 0 <= min_pct <= 1:
+        raise ValueError("min_pct must be between 0 and 1")
+
+    filtered = events.copy()
+    while True:
+        label_freq = filtered["bin"].value_counts(normalize=True, dropna=False)
+        if label_freq.empty or label_freq.min() > min_pct or label_freq.shape[0] < 3:
+            break
+        filtered = filtered[filtered["bin"] != label_freq.idxmin()]
+    return filtered
+
+
 def get_bins(events: pd.DataFrame, close: pd.Series) -> pd.DataFrame:
     """Label events by realized return at the first touched barrier.
 
