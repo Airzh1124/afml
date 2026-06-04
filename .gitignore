@@ -20,8 +20,11 @@ venv/
 data/raw/
 data/interim/
 data/processed/
+data/Binance/
 data/*.csv
+data/**/*.csv
 *.parquet
+*.csv.gz
 *.h5
 *.hdf5
 *.pkl
