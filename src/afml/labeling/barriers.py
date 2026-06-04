@@ -99,6 +99,50 @@ def apply_pt_sl_on_t1(
     return out
 
 
+def get_events(
+    close: pd.Series,
+    t_events: Iterable[pd.Timestamp] | pd.DatetimeIndex,
+    pt_sl: float | tuple[float, float] | list[float],
+    trgt: pd.Series,
+    min_ret: float,
+    *,
+    t1: pd.Series | bool = False,
+    num_threads: int = 1,
+) -> pd.DataFrame:
+    """Find the first barrier touch for sampled events.
+
+    This follows AFML Snippet 3.3 for the case where the bet side is unknown.
+    The horizontal barriers are therefore symmetric. ``num_threads`` is accepted
+    for API compatibility with the book, but this implementation runs in-process.
+    """
+    close = _prepare_close(close)
+    event_index = pd.DatetimeIndex(t_events)
+    if min_ret < 0:
+        raise ValueError("min_ret must be non-negative")
+    if num_threads < 1:
+        raise ValueError("num_threads must be positive")
+
+    pt, sl = _prepare_symmetric_pt_sl(pt_sl)
+    target = _prepare_target(trgt)
+    target = target.reindex(event_index).dropna()
+    target = target[target > min_ret]
+
+    if target.empty:
+        return pd.DataFrame(
+            {"t1": pd.Series(dtype="datetime64[ns]"), "trgt": pd.Series(dtype=float)},
+            index=target.index,
+        )
+
+    t1_series = _prepare_t1(t1, target.index)
+    side = pd.Series(1.0, index=target.index, name="side")
+    events = pd.concat({"t1": t1_series, "trgt": target, "side": side}, axis=1)
+    events = events.dropna(subset=["trgt"])
+
+    touches = apply_pt_sl_on_t1(close, events, (pt, sl))
+    events["t1"] = touches.dropna(how="all").min(axis=1, skipna=True)
+    return events.drop(columns="side").loc[:, ["t1", "trgt"]]
+
+
 def triple_barrier_labels(
     close: pd.Series,
     events: pd.DataFrame,
@@ -181,6 +225,43 @@ def _prepare_pt_sl(pt_sl: tuple[float, float] | list[float]) -> tuple[float, flo
     if pt < 0 or sl < 0:
         raise ValueError("pt and sl must be non-negative")
     return pt, sl
+
+
+def _prepare_symmetric_pt_sl(
+    pt_sl: float | tuple[float, float] | list[float],
+) -> tuple[float, float]:
+    if isinstance(pt_sl, (int, float)):
+        value = float(pt_sl)
+        if value < 0:
+            raise ValueError("pt_sl must be non-negative")
+        return value, value
+
+    pt, sl = _prepare_pt_sl(pt_sl)
+    if pt != sl:
+        raise ValueError("pt_sl must be symmetric when side is unknown")
+    return pt, sl
+
+
+def _prepare_target(trgt: pd.Series) -> pd.Series:
+    if not isinstance(trgt, pd.Series):
+        raise TypeError("trgt must be a pandas Series")
+    if not isinstance(trgt.index, pd.DatetimeIndex):
+        raise TypeError("trgt must be indexed by a pandas DatetimeIndex")
+    if (trgt.dropna() <= 0).any():
+        raise ValueError("trgt values must be positive")
+    return trgt.astype(float).sort_index(kind="mergesort")
+
+
+def _prepare_t1(t1: pd.Series | bool, event_index: pd.DatetimeIndex) -> pd.Series:
+    if isinstance(t1, bool):
+        if t1 is not False:
+            raise ValueError("t1 must be a pandas Series or False")
+        return pd.Series(pd.NaT, index=event_index, name="t1")
+    if not isinstance(t1, pd.Series):
+        raise TypeError("t1 must be a pandas Series or False")
+    if not isinstance(t1.index, pd.DatetimeIndex):
+        raise TypeError("t1 must be indexed by a pandas DatetimeIndex")
+    return pd.to_datetime(t1.reindex(event_index)).rename("t1")
 
 
 def _label_from_return(ret: float) -> int:

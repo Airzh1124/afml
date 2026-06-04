@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from afml.labeling import add_vertical_barrier, apply_pt_sl_on_t1, triple_barrier_labels
+from afml.labeling import add_vertical_barrier, apply_pt_sl_on_t1, get_events, triple_barrier_labels
 
 
 def _close() -> pd.Series:
@@ -77,6 +77,43 @@ def test_triple_barrier_labels_profit_taking_and_stop_loss() -> None:
     assert labels.loc[pd.Timestamp("2024-01-01 09:31:00"), "ret"] == pytest.approx(99 / 103 - 1)
 
 
+def test_get_events_returns_first_touch_and_filters_small_targets() -> None:
+    close = _close()
+    t_events = pd.DatetimeIndex(
+        ["2024-01-01 09:30:00", "2024-01-01 09:31:00", "2024-01-01 09:32:00"]
+    )
+    target = pd.Series(
+        [0.02, 0.005, 0.02],
+        index=t_events,
+        name="trgt",
+    )
+    t1 = pd.Series(
+        pd.to_datetime(
+            [
+                "2024-01-01 09:35:00",
+                "2024-01-01 09:35:00",
+                "2024-01-01 09:35:00",
+            ]
+        ),
+        index=t_events,
+        name="t1",
+    )
+
+    events = get_events(close, t_events, 1, target, min_ret=0.01, t1=t1)
+
+    assert list(events.index) == [
+        pd.Timestamp("2024-01-01 09:30:00"),
+        pd.Timestamp("2024-01-01 09:32:00"),
+    ]
+    assert events.loc[pd.Timestamp("2024-01-01 09:30:00"), "t1"] == pd.Timestamp(
+        "2024-01-01 09:31:00"
+    )
+    assert events.loc[pd.Timestamp("2024-01-01 09:32:00"), "t1"] == pd.Timestamp(
+        "2024-01-01 09:34:00"
+    )
+    assert "side" not in events.columns
+
+
 def test_triple_barrier_labels_uses_vertical_barrier_when_no_horizontal_touch() -> None:
     close = _close()
     events = pd.DataFrame(
@@ -141,3 +178,6 @@ def test_triple_barrier_validates_inputs() -> None:
 
     with pytest.raises(ValueError, match="pt_sl_t1"):
         triple_barrier_labels(close, pd.DataFrame({"trgt": [0.01]}, index=events.index), [1, 1])
+
+    with pytest.raises(ValueError, match="symmetric"):
+        get_events(close, events.index, [1, 2], pd.Series([0.01], index=events.index), min_ret=0)
