@@ -13,6 +13,7 @@ def validate_tick_data(
     schema: TickSchema = DEFAULT_TICK_SCHEMA,
     require_monotonic: bool = True,
     allow_duplicate_timestamps: bool = True,
+    require_timezone: bool = True,
 ) -> None:
     """Validate normalized tick-like data.
 
@@ -27,6 +28,9 @@ def validate_tick_data(
     allow_duplicate_timestamps
         Whether multiple trades may share the same timestamp. This is common in
         futures tick data, so the default allows it.
+    require_timezone
+        Whether the normalized timestamp index must be timezone-aware. The
+        project default is UTC-aware market time.
     """
     missing = [column for column in schema.required_columns if column not in ticks.columns]
     if missing:
@@ -37,6 +41,9 @@ def validate_tick_data(
 
     if ticks.index.hasnans:
         raise ValueError("ticks index contains missing timestamps")
+
+    if require_timezone and ticks.index.tz is None:
+        raise ValueError("ticks index must be timezone-aware")
 
     if require_monotonic and not ticks.index.is_monotonic_increasing:
         raise ValueError("ticks index must be sorted increasingly")

@@ -9,9 +9,9 @@ from dataclasses import dataclass
 class TickSchema:
     """Column names for normalized tick-like market data.
 
-    Normalized tick data should use a pandas ``DatetimeIndex`` as the market
-    time axis. The required columns are ``price`` and ``volume``; optional
-    columns are preserved when present.
+    Normalized tick data should use a UTC timezone-aware pandas
+    ``DatetimeIndex`` as the market time axis. The required columns are
+    ``price`` and ``volume``; optional columns are preserved when present.
     """
 
     price: str = "price"

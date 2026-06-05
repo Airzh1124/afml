@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from afml.data.schemas import DEFAULT_TICK_SCHEMA, TickSchema
+from afml.data.time import normalize_time_index
 from afml.data.validation import validate_tick_data
 
 
@@ -17,6 +18,7 @@ def normalize_tick_data(
     timestamp_col: str | None = None,
     date_col: str | None = None,
     time_col: str | None = None,
+    timezone: str | None = "UTC",
     sort_index: bool = True,
     validate: bool = True,
 ) -> pd.DataFrame:
@@ -24,7 +26,7 @@ def normalize_tick_data(
 
     The internal contract is:
 
-    - ``DatetimeIndex`` represents market time.
+    - ``DatetimeIndex`` represents market time, normalized to UTC by default.
     - Required columns are ``price`` and ``volume``.
     - Optional metadata columns are preserved.
 
@@ -39,19 +41,27 @@ def normalize_tick_data(
     time_col = time_col or schema.time
 
     if timestamp_col in frame.columns:
-        timestamps = pd.to_datetime(frame.pop(timestamp_col))
-        frame.index = pd.DatetimeIndex(timestamps, name=schema.timestamp)
-    elif date_col in frame.columns and time_col in frame.columns:
-        timestamps = pd.to_datetime(
-            frame.pop(date_col).astype(str) + " " + frame.pop(time_col).astype(str)
+        frame.index = normalize_time_index(
+            frame.pop(timestamp_col),
+            name=schema.timestamp,
+            timezone=timezone,
         )
-        frame.index = pd.DatetimeIndex(timestamps, name=schema.timestamp)
+    elif date_col in frame.columns and time_col in frame.columns:
+        frame.index = normalize_time_index(
+            frame.pop(date_col).astype(str) + " " + frame.pop(time_col).astype(str),
+            name=schema.timestamp,
+            timezone=timezone,
+        )
     elif not isinstance(frame.index, pd.DatetimeIndex):
         raise TypeError(
             "tick data must have timestamp columns or a pandas DatetimeIndex"
         )
-    elif frame.index.name is None:
-        frame.index = frame.index.rename(schema.timestamp)
+    else:
+        frame.index = normalize_time_index(
+            frame.index,
+            name=frame.index.name or schema.timestamp,
+            timezone=timezone,
+        )
 
     if sort_index:
         frame = frame.sort_index(kind="mergesort")
@@ -63,7 +73,12 @@ def normalize_tick_data(
         frame[schema.dollar_value] = frame[schema.price] * frame[schema.volume]
 
     if validate:
-        validate_tick_data(frame, schema=schema, require_monotonic=sort_index)
+        validate_tick_data(
+            frame,
+            schema=schema,
+            require_monotonic=sort_index,
+            require_timezone=timezone is not None,
+        )
 
     return frame
 
@@ -75,6 +90,7 @@ def read_tick_csv(
     timestamp_col: str | None = None,
     date_col: str | None = None,
     time_col: str | None = None,
+    timezone: str | None = "UTC",
     **read_csv_kwargs,
 ) -> pd.DataFrame:
     """Read a CSV file and normalize it as tick-like market data."""
@@ -85,4 +101,5 @@ def read_tick_csv(
         timestamp_col=timestamp_col,
         date_col=date_col,
         time_col=time_col,
+        timezone=timezone,
     )

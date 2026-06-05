@@ -355,6 +355,15 @@ Data outputs should generally stay out of git.
 
 - Whether the primary internal data container should be pandas DataFrame only,
   or whether qlib data structures should be supported directly.
-- Whether timestamps should be timezone-aware everywhere.
 - Whether to keep scripts simple or introduce a small CLI later.
 - Whether to use `master` or rename the default branch to `main`.
+
+## Data Contracts
+
+- Normalized market data uses a pandas `DatetimeIndex` named `timestamp`.
+- The data layer normalizes timestamps to UTC timezone-aware values by default.
+- Raw naive timestamps are interpreted as UTC unless `timezone=None` is passed
+  explicitly for a local research exception.
+- Duplicate tick timestamps are allowed by default, because exchange feeds can
+  report multiple trades at the same time. Downstream bars may require an
+  explicit duplicate-index policy before feature alignment.

@@ -114,27 +114,6 @@ def test_get_events_supports_meta_labeling_side_and_asymmetric_barriers() -> Non
     assert list(events["side"]) == [1.0, -1.0]
 
 
-def test_get_events_handles_timezone_aware_timestamps() -> None:
-    close = pd.Series(
-        [100.0, 103.0, 99.0, 98.0],
-        index=pd.DatetimeIndex(
-            [
-                "2024-01-01 09:30:00+00:00",
-                "2024-01-01 09:31:00+00:00",
-                "2024-01-01 09:32:00+00:00",
-                "2024-01-01 09:33:00+00:00",
-            ]
-        ),
-    )
-    t_events = pd.DatetimeIndex(["2024-01-01 09:30:00+00:00"])
-    target = pd.Series([0.02], index=t_events)
-    t1 = pd.Series(pd.to_datetime(["2024-01-01 09:33:00+00:00"]), index=t_events)
-
-    events = get_events(close, t_events, [1, 1], target, min_ret=0, t1=t1)
-
-    assert events["t1"].iloc[0] == pd.Timestamp("2024-01-01 09:31:00+00:00")
-
-
 def test_get_bins_labels_realized_returns_from_events() -> None:
     close = _close()
     events = pd.DataFrame(

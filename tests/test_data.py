@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from afml.data import normalize_tick_data, read_tick_csv, validate_tick_data
+from afml.data import normalize_tick_data, normalize_time_index, read_tick_csv, validate_tick_data
 
 
 SP_CSV = Path(__file__).resolve().parents[1] / "data" / "SP.csv"
@@ -32,7 +32,8 @@ def test_normalize_tick_data_combines_date_and_time_columns() -> None:
             "2000-01-03 08:30:34.000",
             "2000-01-03 08:30:36.000",
             "2000-01-03 08:30:37.000",
-        ]
+        ],
+        utc=True,
     ).tolist()
     assert "date" not in ticks.columns
     assert "time" not in ticks.columns
@@ -48,7 +49,22 @@ def test_normalize_tick_data_accepts_existing_datetime_index() -> None:
     ticks = normalize_tick_data(raw)
 
     assert ticks.index.name == "timestamp"
+    assert ticks.index.tz is not None
     assert list(ticks.columns) == ["price", "volume", "dollar_value"]
+
+
+def test_normalize_tick_data_can_keep_naive_time_when_requested() -> None:
+    raw = _raw_sp_like_ticks()
+
+    ticks = normalize_tick_data(raw, timezone=None, validate=False)
+
+    assert ticks.index.tz is None
+
+
+def test_normalize_time_index_converts_aware_values_to_utc() -> None:
+    index = normalize_time_index(["2024-01-01 09:30:00-05:00"])
+
+    assert list(index) == [pd.Timestamp("2024-01-01 14:30:00+00:00")]
 
 
 def test_read_tick_csv_can_load_sp_sample_when_available() -> None:
@@ -61,7 +77,7 @@ def test_read_tick_csv_can_load_sp_sample_when_available() -> None:
     assert isinstance(ticks.index, pd.DatetimeIndex)
     assert ticks.index.name == "timestamp"
     assert list(ticks.columns) == ["price", "volume", "dollar_value"]
-    assert ticks.index[0] == pd.Timestamp("2000-01-03 08:30:34")
+    assert ticks.index[0] == pd.Timestamp("2000-01-03 08:30:34+00:00")
     assert ticks["price"].iloc[0] == 1496.40
     assert ticks["volume"].iloc[0] == 0
 
@@ -70,6 +86,13 @@ def test_validate_tick_data_allows_zero_volume() -> None:
     ticks = normalize_tick_data(_raw_sp_like_ticks())
 
     validate_tick_data(ticks)
+
+
+def test_validate_tick_data_can_reject_naive_time_index() -> None:
+    ticks = normalize_tick_data(_raw_sp_like_ticks(), timezone=None, validate=False)
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        validate_tick_data(ticks)
 
 
 def test_validate_tick_data_allows_duplicate_timestamps_by_default() -> None:

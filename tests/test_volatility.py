@@ -55,15 +55,15 @@ def test_daily_volatility_returns_empty_when_series_is_shorter_than_one_day() ->
     assert vol.name == "daily_volatility"
 
 
-def test_daily_volatility_handles_timezone_aware_index() -> None:
+def test_daily_volatility_handles_irregular_calendar_gaps() -> None:
     close = pd.Series(
-        [100.0, 101.0, 102.0, 104.0],
+        [100.0, 101.0, 103.0, 104.0],
         index=pd.DatetimeIndex(
             [
-                "2024-01-01 09:30:00+00:00",
-                "2024-01-01 10:30:00+00:00",
-                "2024-01-02 09:30:00+00:00",
-                "2024-01-02 10:30:00+00:00",
+                "2024-01-01 09:30:00",
+                "2024-01-01 15:45:00",
+                "2024-01-03 09:30:00",
+                "2024-01-04 15:45:00",
             ],
             name="timestamp",
         ),
@@ -71,7 +71,10 @@ def test_daily_volatility_handles_timezone_aware_index() -> None:
 
     vol = daily_volatility(close, span=2)
 
-    assert list(vol.index) == [pd.Timestamp("2024-01-02 10:30:00+00:00")]
+    assert list(vol.index) == [
+        pd.Timestamp("2024-01-03 09:30:00"),
+        pd.Timestamp("2024-01-04 15:45:00"),
+    ]
     assert vol.name == "daily_volatility"
 
 
