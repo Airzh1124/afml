@@ -67,6 +67,20 @@ def test_normalize_time_index_converts_aware_values_to_utc() -> None:
     assert list(index) == [pd.Timestamp("2024-01-01 14:30:00+00:00")]
 
 
+def test_normalize_time_index_accepts_iso_strings_with_mixed_precision() -> None:
+    index = normalize_time_index(
+        [
+            "2026-05-04 15:24:47.123456+00:00",
+            "2026-05-04 15:24:48+00:00",
+        ]
+    )
+
+    assert list(index) == [
+        pd.Timestamp("2026-05-04 15:24:47.123456+00:00"),
+        pd.Timestamp("2026-05-04 15:24:48+00:00"),
+    ]
+
+
 def test_read_tick_csv_can_load_sp_sample_when_available() -> None:
     if not SP_CSV.exists():
         pytest.skip("local SP.csv is not available")
